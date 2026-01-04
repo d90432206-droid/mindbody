@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     ChevronLeft,
     ChevronRight,
@@ -6,12 +6,14 @@ import {
     X,
     UserCheck,
     UserMinus,
-    Users
+    Users,
+    Loader2
 } from 'lucide-react';
 import { Sidebar } from './Sidebar';
-import { format, addDays, startOfWeek, addWeeks, subWeeks, isSameDay } from 'date-fns';
+import { format, addDays, startOfWeek, addWeeks, subWeeks, isSameDay, parseISO } from 'date-fns';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { supabase } from '../lib/supabase';
 
 function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
@@ -26,8 +28,9 @@ interface ClassSession {
     duration: number; // minutes
     attendees: number;
     capacity: number;
-    category: 'Yoga' | 'Pilates' | 'HIIT' | 'Strength';
+    category: string;
     color: string;
+    full_start_time: string; // ISO string
 }
 
 interface Attendee {
@@ -36,23 +39,6 @@ interface Attendee {
     status: 'Checked-in' | 'Registered' | 'No-show';
     avatar?: string;
 }
-
-// --- Mock Data ---
-const MOCK_CLASSES: (ClassSession & { dayOffset: number })[] = [
-    { id: '1', name: 'Hatha Yoga Flow', teacher: 'Sarah J.', startTime: '08:00', duration: 60, attendees: 12, capacity: 20, category: 'Yoga', color: 'bg-indigo-100 border-indigo-200 text-indigo-700', dayOffset: 0 },
-    { id: '2', name: 'Reformers Intro', teacher: 'Mike T.', startTime: '10:00', duration: 45, attendees: 8, capacity: 10, category: 'Pilates', color: 'bg-emerald-100 border-emerald-200 text-emerald-700', dayOffset: 1 },
-    { id: '3', name: 'Power HIIT', teacher: 'Anna W.', startTime: '12:00', duration: 60, attendees: 18, capacity: 20, category: 'HIIT', color: 'bg-orange-100 border-orange-200 text-orange-700', dayOffset: 2 },
-    { id: '4', name: 'Core Strength', teacher: 'David L.', startTime: '17:00', duration: 75, attendees: 15, capacity: 15, category: 'Strength', color: 'bg-blue-100 border-blue-200 text-blue-700', dayOffset: 3 },
-    { id: '5', name: 'Vinyasa Flow', teacher: 'Sarah J.', startTime: '09:00', duration: 60, attendees: 10, capacity: 15, category: 'Yoga', color: 'bg-indigo-100 border-indigo-200 text-indigo-700', dayOffset: 4 },
-];
-
-const MOCK_ATTENDEES: Attendee[] = [
-    { id: 'a1', name: 'Emily Chen', status: 'Checked-in' },
-    { id: 'a2', name: 'James Wilson', status: 'Registered' },
-    { id: 'a3', name: 'Sophia Rodriguez', status: 'Checked-in' },
-    { id: 'a4', name: 'Liam Zhang', status: 'No-show' },
-    { id: 'a5', name: 'Olivia Brown', status: 'Registered' },
-];
 
 // --- Components ---
 
@@ -72,9 +58,103 @@ const TimeColumn = () => (
 export const AdminSchedule: React.FC<{ hideSidebar?: boolean }> = ({ hideSidebar = false }) => {
     const [currentWeek, setCurrentWeek] = useState(new Date());
     const [selectedClass, setSelectedClass] = useState<ClassSession | null>(null);
+    const [sessions, setSessions] = useState<ClassSession[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [attendees, setAttendees] = useState<Attendee[]>([]);
+    const [isLoadingAttendees, setIsLoadingAttendees] = useState(false);
 
     const weekStart = startOfWeek(currentWeek, { weekStartsOn: 1 });
     const weekDays = Array.from({ length: 7 }).map((_, i) => addDays(weekStart, i));
+
+    const fetchSessions = async () => {
+        setIsLoading(true);
+        try {
+            const startStr = weekStart.toISOString();
+            const endStr = addDays(weekStart, 7).toISOString();
+
+            const { data, error } = await supabase
+                .from('class_sessions')
+                .select(`
+                    id,
+                    start_time,
+                    duration_minutes,
+                    capacity,
+                    classes (
+                        name,
+                        teacher_name,
+                        category,
+                        color_theme
+                    ),
+                    bookings (id)
+                `)
+                .gte('start_time', startStr)
+                .lt('start_time', endStr);
+
+            if (error) throw error;
+
+            const formatted: ClassSession[] = (data || []).map((s: any) => ({
+                id: s.id,
+                name: s.classes.name,
+                teacher: s.classes.teacher_name,
+                startTime: format(parseISO(s.start_time), 'HH:mm'),
+                duration: s.duration_minutes,
+                capacity: s.capacity,
+                attendees: s.bookings?.length || 0,
+                category: s.classes.category,
+                color: s.classes.color_theme,
+                full_start_time: s.start_time
+            }));
+
+            setSessions(formatted);
+        } catch (error) {
+            console.error('Error fetching sessions:', error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const fetchAttendees = async (sessionId: string) => {
+        setIsLoadingAttendees(true);
+        try {
+            const { data, error } = await supabase
+                .from('bookings')
+                .select(`
+                    id,
+                    status,
+                    members (
+                        id,
+                        name
+                    )
+                `)
+                .eq('session_id', sessionId);
+
+            if (error) throw error;
+
+            const formatted: Attendee[] = (data || []).map((b: any) => ({
+                id: b.members.id,
+                name: b.members.name,
+                status: b.status
+            }));
+
+            setAttendees(formatted);
+        } catch (error) {
+            console.error('Error fetching attendees:', error);
+        } finally {
+            setIsLoadingAttendees(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchSessions();
+    }, [currentWeek]);
+
+    useEffect(() => {
+        if (selectedClass) {
+            fetchAttendees(selectedClass.id);
+        } else {
+            setAttendees([]);
+        }
+    }, [selectedClass]);
 
     const handlePrevWeek = () => setCurrentWeek(prev => subWeeks(prev, 1));
     const handleNextWeek = () => setCurrentWeek(next => addWeeks(next, 1));
@@ -111,6 +191,7 @@ export const AdminSchedule: React.FC<{ hideSidebar?: boolean }> = ({ hideSidebar
                                 <ChevronRight size={20} />
                             </button>
                         </div>
+                        {isLoading && <Loader2 className="animate-spin text-mindbody" size={20} />}
                     </div>
 
                     <button className="bg-mindbody hover:bg-opacity-90 text-white px-4 py-2 rounded-lg font-medium flex items-center shadow-sm transition-all hover:shadow-md active:scale-95">
@@ -147,13 +228,13 @@ export const AdminSchedule: React.FC<{ hideSidebar?: boolean }> = ({ hideSidebar
                                             <div key={i} className="h-20 border-b border-slate-50" />
                                         ))}
 
-                                        {/* Updated Class Rendering logic */}
-                                        {MOCK_CLASSES.filter(cls => cls.dayOffset === (day.getDay() + 6) % 7).map(cls => (
+                                        {/* Class Rendering */}
+                                        {sessions.filter(s => isSameDay(parseISO(s.full_start_time), day)).map(cls => (
                                             <button
                                                 key={cls.id}
                                                 onClick={() => setSelectedClass(cls)}
                                                 className={cn(
-                                                    "absolute left-2 right-2 rounded-lg border p-3 flex flex-col text-left transition-all hover:shadow-md cursor-pointer",
+                                                    "absolute left-2 right-2 rounded-lg border p-3 flex flex-col text-left transition-all hover:shadow-md cursor-pointer z-10",
                                                     cls.color
                                                 )}
                                                 style={{
@@ -180,7 +261,7 @@ export const AdminSchedule: React.FC<{ hideSidebar?: boolean }> = ({ hideSidebar
             {/* Slide-over Backdrop */}
             <div
                 className={cn(
-                    "fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40 transition-opacity duration-300",
+                    "fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-[100] transition-opacity duration-300",
                     selectedClass ? "opacity-100" : "opacity-0 pointer-events-none"
                 )}
                 onClick={() => setSelectedClass(null)}
@@ -188,7 +269,7 @@ export const AdminSchedule: React.FC<{ hideSidebar?: boolean }> = ({ hideSidebar
 
             {/* Slide-over Drawer */}
             <aside className={cn(
-                "fixed right-0 top-0 h-full w-96 bg-white shadow-2xl z-50 transition-transform duration-300 transform border-l border-slate-200",
+                "fixed right-0 top-0 h-full w-96 bg-white shadow-2xl z-[110] transition-transform duration-300 transform border-l border-slate-200",
                 selectedClass ? "translate-x-0" : "translate-x-full"
             )}>
                 {selectedClass && (
@@ -209,39 +290,50 @@ export const AdminSchedule: React.FC<{ hideSidebar?: boolean }> = ({ hideSidebar
                         <div className="p-6 flex-1 overflow-auto custom-scrollbar">
                             <div className="flex items-center justify-between mb-6">
                                 <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">學員名單 ({selectedClass.attendees})</span>
-                                <span className="text-xs px-2 py-1 bg-slate-100 rounded text-slate-600 font-bold">
-                                    出席率: {Math.round((MOCK_ATTENDEES.filter(a => a.status === 'Checked-in').length / MOCK_ATTENDEES.length) * 100)}%
-                                </span>
+                                {attendees.length > 0 && (
+                                    <span className="text-xs px-2 py-1 bg-slate-100 rounded text-slate-600 font-bold">
+                                        出席率: {Math.round((attendees.filter(a => a.status === 'Checked-in').length / attendees.length) * 100)}%
+                                    </span>
+                                )}
                             </div>
 
                             <div className="space-y-3">
-                                {MOCK_ATTENDEES.map((attendee) => (
-                                    <div key={attendee.id} className="flex items-center justify-between p-4 rounded-xl border border-slate-100 bg-slate-50/50">
-                                        <div className="flex items-center">
-                                            <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold mr-3">
-                                                {attendee.name.charAt(0)}
-                                            </div>
-                                            <div>
-                                                <p className="text-sm font-bold text-slate-800">{attendee.name}</p>
-                                                <p className={cn(
-                                                    "text-xs font-medium",
-                                                    attendee.status === 'Checked-in' ? "text-emerald-600" :
-                                                        attendee.status === 'No-show' ? "text-red-500" : "text-slate-400"
-                                                )}>
-                                                    {attendee.status}
-                                                </p>
-                                            </div>
-                                        </div>
-                                        <div className="flex space-x-1">
-                                            <button className="p-2 text-slate-400 hover:text-emerald-500 hover:bg-white rounded-lg transition-all shadow-sm">
-                                                <UserCheck size={18} />
-                                            </button>
-                                            <button className="p-2 text-slate-400 hover:text-red-400 hover:bg-white rounded-lg transition-all shadow-sm">
-                                                <UserMinus size={18} />
-                                            </button>
-                                        </div>
+                                {isLoadingAttendees ? (
+                                    <div className="flex flex-col items-center py-10 space-y-2">
+                                        <Loader2 className="animate-spin text-slate-300" size={24} />
+                                        <p className="text-xs font-medium text-slate-400">載入中...</p>
                                     </div>
-                                ))}
+                                ) : attendees.length === 0 ? (
+                                    <p className="text-center py-10 text-slate-400 text-sm italic">尚無學員預約</p>
+                                ) : (
+                                    attendees.map((attendee) => (
+                                        <div key={attendee.id} className="flex items-center justify-between p-4 rounded-xl border border-slate-100 bg-slate-50/50">
+                                            <div className="flex items-center">
+                                                <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold mr-3">
+                                                    {attendee.name.charAt(0)}
+                                                </div>
+                                                <div>
+                                                    <p className="text-sm font-bold text-slate-800">{attendee.name}</p>
+                                                    <p className={cn(
+                                                        "text-xs font-medium",
+                                                        attendee.status === 'Checked-in' ? "text-emerald-600" :
+                                                            attendee.status === 'No-show' ? "text-red-500" : "text-slate-400"
+                                                    )}>
+                                                        {attendee.status}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div className="flex space-x-1">
+                                                <button className="p-2 text-slate-400 hover:text-emerald-500 hover:bg-white rounded-lg transition-all shadow-sm">
+                                                    <UserCheck size={18} />
+                                                </button>
+                                                <button className="p-2 text-slate-400 hover:text-red-400 hover:bg-white rounded-lg transition-all shadow-sm">
+                                                    <UserMinus size={18} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
                             </div>
                         </div>
 

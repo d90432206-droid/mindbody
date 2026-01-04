@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     TrendingUp,
     Users,
@@ -7,23 +7,11 @@ import {
     ArrowDownRight,
     UserCheck,
     Star,
-    Award
+    Award,
+    Loader2
 } from 'lucide-react';
 import { motion } from 'framer-motion';
-
-const STATS = [
-    { label: '今日營收', value: '$42,500', trend: '+12.5%', isUp: true, icon: <DollarSign className="text-emerald-500" /> },
-    { label: '預約人數', value: '156', trend: '+8.2%', isUp: true, icon: <UserCheck className="text-blue-500" /> },
-    { label: '活躍會員', value: '1,280', trend: '-2.4%', isUp: false, icon: <Users className="text-indigo-500" /> },
-    { label: '課程點擊率', value: '68%', trend: '+5.0%', isUp: true, icon: <TrendingUp className="text-orange-500" /> },
-];
-
-const TEACHERS = [
-    { name: 'Sarah Jenkins', category: 'Yoga', rating: 4.9, bookings: 42, growth: '+15%' },
-    { name: 'Mike Thompson', category: 'Pilates', rating: 4.8, bookings: 38, growth: '+10%' },
-    { name: 'Anna White', category: 'HIIT', rating: 4.9, bookings: 35, growth: '+22%' },
-    { name: 'David Lee', category: 'Strength', rating: 4.7, bookings: 31, growth: '+5%' },
-];
+import { supabase } from '../lib/supabase';
 
 // Simple SVG Line Chart Component
 const MiniChart = () => {
@@ -56,17 +44,65 @@ const MiniChart = () => {
 };
 
 export const AdminDashboard: React.FC = () => {
+    const [stats, setStats] = useState([
+        { label: '實時營收', value: '$42,500', trend: '+12.5%', isUp: true, icon: <DollarSign className="text-emerald-500" /> },
+        { label: '本週預約', value: '0', trend: '+8.2%', isUp: true, icon: <UserCheck className="text-blue-500" /> },
+        { label: '活躍會員', value: '0', trend: '+2.4%', isUp: true, icon: <Users className="text-indigo-500" /> },
+        { label: '平均滿意度', value: '4.9', trend: '+0.1%', isUp: true, icon: <TrendingUp className="text-orange-500" /> },
+    ]);
+    const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchStats = async () => {
+            setIsLoading(true);
+            try {
+                // Fetch member count
+                const { count: memberCount } = await supabase
+                    .from('members')
+                    .select('*', { count: 'exact', head: true });
+
+                // Fetch booking count
+                const { count: bookingCount } = await supabase
+                    .from('bookings')
+                    .select('*', { count: 'exact', head: true });
+
+                setStats(prev => [
+                    prev[0],
+                    { ...prev[1], value: bookingCount?.toString() || '0' },
+                    { ...prev[2], value: memberCount?.toString() || '0' },
+                    prev[3]
+                ]);
+            } catch (error) {
+                console.error('Error fetching dashboard stats:', error);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        fetchStats();
+    }, []);
+
+    const TEACHERS = [
+        { name: 'Sarah Jenkins', category: 'Yoga', rating: 4.9, bookings: 42, growth: '+15%' },
+        { name: 'Mike Thompson', category: 'Pilates', rating: 4.8, bookings: 38, growth: '+10%' },
+        { name: 'Anna White', category: 'HIIT', rating: 4.9, bookings: 35, growth: '+22%' },
+        { name: 'David Lee', category: 'Strength', rating: 4.7, bookings: 31, growth: '+5%' },
+    ];
+
     return (
         <div className="p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {/* Header */}
-            <div>
-                <h2 className="text-2xl font-bold text-slate-800">數據總覽</h2>
-                <p className="text-slate-500 text-sm">歡迎回來，這是您今天的健身房經營現況。</p>
+            <div className="flex justify-between items-center">
+                <div>
+                    <h2 className="text-2xl font-bold text-slate-800">數據總覽</h2>
+                    <p className="text-slate-500 text-sm">歡迎回來，這是您目前的健身房經營現況。</p>
+                </div>
+                {isLoading && <Loader2 className="animate-spin text-mindbody" size={24} />}
             </div>
 
             {/* Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {STATS.map((stat, i) => (
+                {stats.map((stat, i) => (
                     <div key={i} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
                         <div className="flex justify-between items-start mb-4">
                             <div className="p-3 bg-slate-50 rounded-xl">{stat.icon}</div>
