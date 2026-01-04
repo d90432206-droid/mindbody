@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
     Bell,
     Clock,
-    Filter,
+    User,
     CheckCircle2,
     CalendarDays,
     XCircle,

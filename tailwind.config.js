@@ -7,7 +7,8 @@ export default {
   theme: {
     extend: {
       colors: {
-        mindbody: '#E31C5F',
+        mindbody: '#E68A00', // NoMad Orange
+        'nomad-dark': '#4B4B4B', // NoMad Dark Grey
         gold: {
           light: '#F5E6CA',
           DEFAULT: '#D4AF37',

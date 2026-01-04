@@ -5,7 +5,6 @@ import {
     ChevronRight,
     CreditCard,
     History,
-    LogOut,
     Settings,
     Star,
     Trophy,
@@ -15,14 +14,8 @@ import {
     CalendarDays
 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
 import { supabase } from '../lib/supabase';
 import { format, parseISO } from 'date-fns';
-
-function cn(...inputs: ClassValue[]) {
-    return twMerge(clsx(inputs));
-}
 
 // --- Types ---
 interface MemberProfileProps {
