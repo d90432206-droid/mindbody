@@ -7,10 +7,12 @@ import {
     UserCheck,
     UserMinus,
     Users,
-    Loader2
+    Loader2,
+    Calendar as CalendarIcon,
+    Clock
 } from 'lucide-react';
 import { Sidebar } from './Sidebar';
-import { format, addDays, startOfWeek, addWeeks, subWeeks, isSameDay, parseISO } from 'date-fns';
+import { format, addDays, startOfWeek, addWeeks, subWeeks, isSameDay, parseISO, setHours, setMinutes } from 'date-fns';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { supabase } from '../lib/supabase';
@@ -20,6 +22,14 @@ function cn(...inputs: ClassValue[]) {
 }
 
 // --- Types ---
+interface ClassTemplate {
+    id: string;
+    name: string;
+    teacher_name: string;
+    category: string;
+    color_theme: string;
+}
+
 interface ClassSession {
     id: string;
     name: string;
@@ -62,6 +72,16 @@ export const AdminSchedule: React.FC<{ hideSidebar?: boolean }> = ({ hideSidebar
     const [isLoading, setIsLoading] = useState(true);
     const [attendees, setAttendees] = useState<Attendee[]>([]);
     const [isLoadingAttendees, setIsLoadingAttendees] = useState(false);
+
+    // Add Session Modal States
+    const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+    const [templates, setTemplates] = useState<ClassTemplate[]>([]);
+    const [selectedTemplateId, setSelectedTemplateId] = useState('');
+    const [sessionDate, setSessionDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+    const [sessionTime, setSessionTime] = useState('08:00');
+    const [duration, setDuration] = useState(60);
+    const [capacity, setCapacity] = useState(20);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     const weekStart = startOfWeek(currentWeek, { weekStartsOn: 1 });
     const weekDays = Array.from({ length: 7 }).map((_, i) => addDays(weekStart, i));
@@ -113,6 +133,17 @@ export const AdminSchedule: React.FC<{ hideSidebar?: boolean }> = ({ hideSidebar
         }
     };
 
+    const fetchTemplates = async () => {
+        try {
+            const { data, error } = await supabase.from('classes').select('*');
+            if (error) throw error;
+            setTemplates(data || []);
+            if (data && data.length > 0) setSelectedTemplateId(data[0].id);
+        } catch (error) {
+            console.error('Error fetching templates:', error);
+        }
+    };
+
     const fetchAttendees = async (sessionId: string) => {
         setIsLoadingAttendees(true);
         try {
@@ -156,9 +187,45 @@ export const AdminSchedule: React.FC<{ hideSidebar?: boolean }> = ({ hideSidebar
         }
     }, [selectedClass]);
 
+    useEffect(() => {
+        if (isAddModalOpen) {
+            fetchTemplates();
+        }
+    }, [isAddModalOpen]);
+
     const handlePrevWeek = () => setCurrentWeek(prev => subWeeks(prev, 1));
     const handleNextWeek = () => setCurrentWeek(next => addWeeks(next, 1));
     const handleToday = () => setCurrentWeek(new Date());
+
+    const handleAddSession = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setIsSubmitting(true);
+
+        try {
+            const [hours, minutes] = sessionTime.split(':').map(Number);
+            const date = parseISO(sessionDate);
+            const combinedDateTime = setMinutes(setHours(date, hours), minutes);
+
+            const { error } = await supabase
+                .from('class_sessions')
+                .insert([{
+                    class_id: selectedTemplateId,
+                    start_time: combinedDateTime.toISOString(),
+                    duration_minutes: duration,
+                    capacity: capacity
+                }]);
+
+            if (error) throw error;
+
+            setIsAddModalOpen(false);
+            fetchSessions();
+        } catch (error) {
+            console.error('Error adding session:', error);
+            alert('新增課程失敗，請稍後再試。');
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
 
     return (
         <div className="flex h-full bg-slate-50 overflow-hidden font-sans">
@@ -194,7 +261,10 @@ export const AdminSchedule: React.FC<{ hideSidebar?: boolean }> = ({ hideSidebar
                         {isLoading && <Loader2 className="animate-spin text-mindbody" size={20} />}
                     </div>
 
-                    <button className="bg-mindbody hover:bg-opacity-90 text-white px-4 py-2 rounded-lg font-medium flex items-center shadow-sm transition-all hover:shadow-md active:scale-95">
+                    <button
+                        onClick={() => setIsAddModalOpen(true)}
+                        className="bg-mindbody hover:bg-opacity-90 text-white px-4 py-2 rounded-lg font-medium flex items-center shadow-sm transition-all hover:shadow-md active:scale-95"
+                    >
                         <Plus size={18} className="mr-2" />
                         新增課程
                     </button>
@@ -345,6 +415,95 @@ export const AdminSchedule: React.FC<{ hideSidebar?: boolean }> = ({ hideSidebar
                     </div>
                 )}
             </aside>
+
+            {/* Add Session Modal */}
+            {isAddModalOpen && (
+                <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-300">
+                    <form onSubmit={handleAddSession} className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 animate-in zoom-in-95 duration-300">
+                        <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                            <h3 className="text-xl font-bold text-slate-800">新增課表內容</h3>
+                            <button type="button" onClick={() => setIsAddModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full text-slate-400 transition-colors">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="p-8 space-y-6">
+                            <div className="space-y-2">
+                                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">選擇課程種類</label>
+                                <select
+                                    required
+                                    value={selectedTemplateId}
+                                    onChange={(e) => setSelectedTemplateId(e.target.value)}
+                                    className="w-full px-4 py-3 bg-slate-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-mindbody/20 appearance-none"
+                                >
+                                    {templates.map(t => (
+                                        <option key={t.id} value={t.id}>{t.name} ({t.teacher_name})</option>
+                                    ))}
+                                    {templates.length === 0 && <option disabled>讀取中或無模板...</option>}
+                                </select>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center">
+                                        <CalendarIcon size={14} className="mr-1" /> 日期
+                                    </label>
+                                    <input
+                                        type="date"
+                                        required
+                                        value={sessionDate}
+                                        onChange={(e) => setSessionDate(e.target.value)}
+                                        className="w-full px-4 py-3 bg-slate-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-mindbody/20"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center">
+                                        <Clock size={14} className="mr-1" /> 開始時間
+                                    </label>
+                                    <input
+                                        type="time"
+                                        required
+                                        value={sessionTime}
+                                        onChange={(e) => setSessionTime(e.target.value)}
+                                        className="w-full px-4 py-3 bg-slate-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-mindbody/20"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">時長 (分鐘)</label>
+                                    <input
+                                        type="number"
+                                        required
+                                        value={duration}
+                                        onChange={(e) => setDuration(Number(e.target.value))}
+                                        className="w-full px-4 py-3 bg-slate-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-mindbody/20"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">容納人數</label>
+                                    <input
+                                        type="number"
+                                        required
+                                        value={capacity}
+                                        onChange={(e) => setCapacity(Number(e.target.value))}
+                                        className="w-full px-4 py-3 bg-slate-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-mindbody/20"
+                                    />
+                                </div>
+                            </div>
+
+                            <button
+                                disabled={isSubmitting || templates.length === 0}
+                                type="submit"
+                                className="w-full bg-mindbody text-white py-4 rounded-2xl font-bold shadow-lg shadow-mindbody/20 hover:shadow-xl hover:translate-y-[-2px] active:translate-y-0 disabled:opacity-50 disabled:translate-y-0 transition-all mt-4 flex items-center justify-center space-x-2"
+                            >
+                                {isSubmitting && <Loader2 size={20} className="animate-spin" />}
+                                <span>發佈到課表</span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            )}
         </div>
     );
 };
